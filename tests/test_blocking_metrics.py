@@ -189,7 +189,7 @@ def test_serialisation():
 
 def main():
     print("=" * 60)
-    print("  Blocking Metrics — Synthetic Test Suite")
+    print("  Blocking Metrics -- Synthetic Test Suite")
     print("=" * 60)
 
     test_perfect_recall()
@@ -199,7 +199,7 @@ def main():
     test_serialisation()
 
     print("\n" + "=" * 60)
-    print("  ALL TESTS PASSED ✓")
+    print("  ALL TESTS PASSED [OK]")
     print("=" * 60 + "\n")
 
 

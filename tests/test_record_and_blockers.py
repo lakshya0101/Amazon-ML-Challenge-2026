@@ -216,6 +216,17 @@ class TestSyntheticEndToEndSmoke(unittest.TestCase):
         self.assertEqual(eval_res.total_true_pairs, 3)
         self.assertGreaterEqual(eval_res.candidate_pair_recall, 0.66)
 
+    def test_evaluate_blocking_defensive_tuple_unwrapping(self):
+        """Test evaluate_blocking safely handles a 2-tuple (candidate_map, blocker_name)."""
+        s1 = [("S1-A", "Alpha Traders", "1 St, NY, 10001", "US")]
+        s2 = [("S2-A1", "Alpha Traders Inc", "1 St, NY, 10001", "US")]
+        s3 = []
+        gt = {"S1-A": {"S2-A1"}}
+        blocker_out = blocker_exact_norm_name(s1, s2, s3)  # returns (cmap, 'B1_exact_norm_name')
+        res = evaluate_blocking(blocker_out, gt)
+        self.assertEqual(res.candidate_pair_recall, 1.0)
+        self.assertEqual(res.total_true_pairs, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -129,15 +129,17 @@ _MAX_DIAGNOSTIC_IDS = 500
 
 
 def evaluate_blocking(
-    candidates: Dict[str, Set[str]],
+    candidates: Dict[str, Set[str]] | Tuple[Dict[str, Set[str]], str],
     ground_truth: Dict[str, Set[str]],
 ) -> BlockingEvalResult:
     """Compare generated candidate pairs against ground truth.
 
     Parameters
     ----------
-    candidates : dict[str, set[str]]
+    candidates : dict[str, set[str]] or tuple(dict[str, set[str]], str)
         Generated mapping: S1 entity_id → set of candidate S2/S3 entity_ids.
+        If a blocker return tuple (candidate_map, blocker_name) is passed,
+        it is defensively unwrapped.
     ground_truth : dict[str, set[str]]
         True mapping:     S1 entity_id → set of true-match S2/S3 entity_ids.
 
@@ -146,6 +148,15 @@ def evaluate_blocking(
     BlockingEvalResult
         Dataclass with every requested metric.
     """
+    # Defensive unwrap for (candidate_map, blocker_name) tuple
+    if (
+        isinstance(candidates, tuple)
+        and len(candidates) == 2
+        and isinstance(candidates[0], dict)
+        and isinstance(candidates[1], str)
+    ):
+        candidates = candidates[0]
+
     t0 = time.perf_counter()
     res = BlockingEvalResult()
 
@@ -222,7 +233,7 @@ def print_report(result: BlockingEvalResult, title: str = "Blocking Evaluation")
     print()
     print(f"  S1 Entities in Ground Truth:     {result.total_s1_entities_in_gt:,}")
     print(f"  % S1 ALL matches retrieved:      {result.pct_s1_all_matches_retrieved:.4%}")
-    print(f"  % S1 ≥1 match retrieved:         {result.pct_s1_at_least_one_retrieved:.4%}")
+    print(f"  % S1 >=1 match retrieved:        {result.pct_s1_at_least_one_retrieved:.4%}")
     print()
     print(f"  Completely recovered S1:          {result.completely_recovered_s1_count:,}")
     print(f"  Partially recovered S1:           {result.partially_recovered_s1_count:,}")
