@@ -1,6 +1,7 @@
 """
 Fast, memory-efficient data loader for Amazon ML Challenge 2026.
-Uses Polars lazy scanning and Parquet caching where available.
+Uses Polars lazy scanning and Parquet caching where available,
+and yields canonical EntityRecord tuples for consistent in-memory representation.
 """
 
 from __future__ import annotations
@@ -9,6 +10,8 @@ import csv
 import os
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple, Any
+
+from src.data.record import EntityRecord
 
 # Try importing polars
 try:
@@ -32,7 +35,6 @@ def convert_tsv_to_parquet(tsv_path: str, parquet_path: str) -> bool:
         return False
     try:
         os.makedirs(os.path.dirname(parquet_path) or ".", exist_ok=True)
-        # Scan lazily and stream out to parquet
         lazy_df = pl.scan_csv(
             tsv_path,
             separator="\t",
@@ -55,7 +57,7 @@ def load_source_df(
     cache_dir: Optional[str] = None,
 ) -> Any:
     """
-    Load a source TSV into a Polars DataFrame (or fallback).
+    Load a source TSV into a Polars DataFrame (or fallback to List[EntityRecord]).
     Uses lazy scanning and column projection to avoid loading unused columns into RAM.
     """
     if not os.path.exists(tsv_path):
@@ -64,9 +66,7 @@ def load_source_df(
     if HAS_POLARS:
         if cache_dir and use_cache:
             p_path = get_parquet_cache_path(tsv_path, cache_dir)
-            # Check if cache is valid and fresh
             if os.path.exists(p_path) and os.path.getmtime(p_path) >= os.path.getmtime(tsv_path):
-                # Lazy scan parquet and select only requested columns
                 scan = pl.scan_parquet(p_path)
                 if columns:
                     avail = scan.columns
@@ -74,7 +74,6 @@ def load_source_df(
                     scan = scan.select(cols)
                 return scan.collect()
             else:
-                # TSV scan
                 scan = pl.scan_csv(
                     tsv_path,
                     separator="\t",
@@ -87,7 +86,6 @@ def load_source_df(
                     cols = [c for c in columns if c in avail]
                     scan = scan.select(cols)
                 df = scan.collect()
-                # Optionally cache to parquet in background
                 if cache_dir:
                     try:
                         os.makedirs(cache_dir, exist_ok=True)
@@ -109,22 +107,23 @@ def load_source_df(
                 scan = scan.select(cols)
             return scan.collect()
     else:
-        # Fallback when Polars is not available: return list of tuples
         return load_source_tuples(tsv_path, columns=columns)
 
 
 def load_source_tuples(
     tsv_path: str,
     columns: Optional[List[str]] = None,
-) -> List[Tuple[Any, ...]]:
+) -> List[EntityRecord]:
     """
-    Memory-efficient stream loading returning compact tuples instead of dictionaries.
-    Avoids dict overhead for millions of records.
+    Memory-efficient stream loading returning canonical EntityRecord objects.
+    Preserves tuple interface (isinstance(r, tuple) is True) while guaranteeing
+    standard column alignment (entity_id, business_name, business_address, country)
+    and attribute/.get() access with zero extra memory overhead.
     """
     if not os.path.exists(tsv_path):
         raise FileNotFoundError(f"File not found: {tsv_path}")
 
-    results = []
+    results: List[EntityRecord] = []
     with open(tsv_path, "r", encoding="utf-8") as fh:
         reader = csv.reader(fh, delimiter="\t")
         try:
@@ -132,23 +131,31 @@ def load_source_tuples(
         except StopIteration:
             return []
 
-        col_indices = []
-        if columns:
-            for c in columns:
-                if c in headers:
-                    col_indices.append(headers.index(c))
-                else:
-                    col_indices.append(-1)
-        else:
-            col_indices = list(range(len(headers)))
+        header_map = {col.strip().lower(): idx for idx, col in enumerate(headers)}
+        eid_idx = header_map.get("entity_id", 0)
+        name_idx = header_map.get("business_name", 1)
+        addr_idx = header_map.get("business_address", 2)
+        country_idx = header_map.get("country", 3)
 
         for row in reader:
-            item = tuple(
-                (row[idx] if 0 <= idx < len(row) else "")
-                for idx in col_indices
+            n = len(row)
+            item = EntityRecord(
+                entity_id=row[eid_idx] if 0 <= eid_idx < n else "",
+                business_name=row[name_idx] if 0 <= name_idx < n else "",
+                business_address=row[addr_idx] if 0 <= addr_idx < n else "",
+                country=row[country_idx] if 0 <= country_idx < n else "",
             )
             results.append(item)
     return results
+
+
+def load_source_records(
+    tsv_path: str,
+    use_cache: bool = True,
+    cache_dir: Optional[str] = None,
+) -> List[EntityRecord]:
+    """Alias for load_source_tuples, returning canonical EntityRecord objects."""
+    return load_source_tuples(tsv_path)
 
 
 def load_ground_truth_fast(

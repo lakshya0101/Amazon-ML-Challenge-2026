@@ -2,6 +2,7 @@
 TF-IDF Candidate Retrieval for Amazon ML Challenge 2026.
 Uses character/word n-gram TF-IDF and sparse inverted index or batched matrix multiplication.
 Can be trained and cached to disk for reusable execution.
+Uses canonical EntityRecord representation.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import pickle
 from collections import defaultdict
 from typing import Dict, List, Optional, Set, Tuple, Any
 
+from src.data.record import EntityRecord, ensure_records
 from src.normalization.name_normalizer import normalize_name
 
 try:
@@ -42,30 +44,31 @@ def blocker_tfidf_retrieval(
         print("[Warning] scikit-learn not available. Skipping TF-IDF blocker.")
         return {}, name
 
+    s2_records = ensure_records(s2_data)
+    s3_records = ensure_records(s3_data)
+    s1_records = ensure_records(s1_data)
+
     # Group targets (S2 + S3) by country
     targets_by_country: Dict[str, List[Tuple[str, str]]] = defaultdict(list)
-    for item in s2_data:
-        eid = item[0]
-        bname = normalize_name(item[1])
-        country = (item[3] if len(item) > 3 else "UNKNOWN") or "UNKNOWN"
+    for rec in s2_records:
+        bname = normalize_name(rec.business_name)
+        country = rec.country.strip() or "UNKNOWN"
         if bname:
-            targets_by_country[country.strip()].append((eid, bname))
+            targets_by_country[country].append((rec.entity_id, bname))
 
-    for item in s3_data:
-        eid = item[0]
-        bname = normalize_name(item[1])
-        country = (item[3] if len(item) > 3 else "UNKNOWN") or "UNKNOWN"
+    for rec in s3_records:
+        bname = normalize_name(rec.business_name)
+        country = rec.country.strip() or "UNKNOWN"
         if bname:
-            targets_by_country[country.strip()].append((eid, bname))
+            targets_by_country[country].append((rec.entity_id, bname))
 
     # Group queries (S1) by country
     queries_by_country: Dict[str, List[Tuple[str, str]]] = defaultdict(list)
-    for item in s1_data:
-        eid = item[0]
-        bname = normalize_name(item[1])
-        country = (item[3] if len(item) > 3 else "UNKNOWN") or "UNKNOWN"
+    for rec in s1_records:
+        bname = normalize_name(rec.business_name)
+        country = rec.country.strip() or "UNKNOWN"
         if bname:
-            queries_by_country[country.strip()].append((eid, bname))
+            queries_by_country[country].append((rec.entity_id, bname))
 
     candidates: Dict[str, Set[str]] = defaultdict(set)
 
@@ -111,19 +114,15 @@ def blocker_tfidf_retrieval(
             q_ids = [q[0] for q in chunk]
 
             q_matrix = vectorizer.transform(q_names)
-            # Sparse similarity matrix: shape (batch_size, n_targets)
             sim_matrix = q_matrix.dot(t_matrix.T)
 
-            # Extract top_k above threshold for each row
             for row_idx, q_id in enumerate(q_ids):
                 row = sim_matrix.getrow(row_idx)
                 if row.nnz == 0:
                     continue
-                # Get non-zero data
                 col_indices = row.indices
                 scores = row.data
 
-                # Filter by min_similarity
                 mask = scores >= min_similarity
                 valid_cols = col_indices[mask]
                 valid_scores = scores[mask]

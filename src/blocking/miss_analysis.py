@@ -1,6 +1,7 @@
 """
 Miss Analysis Module for Amazon ML Challenge 2026.
 Analyzes ground truth pairs missed by candidate generation to diagnose recall gaps.
+Uses canonical EntityRecord representation.
 """
 
 from __future__ import annotations
@@ -10,19 +11,34 @@ import os
 from collections import Counter
 from typing import Dict, List, Set, Any, Optional
 
+from src.data.record import EntityRecord
 from src.normalization.name_normalizer import normalize_name, informative_tokens
+
+
+def _to_entity_record(info: Any, fallback_id: str = "") -> EntityRecord:
+    """Helper to convert dictionary, EntityRecord, 3-tuple or 4-tuple to EntityRecord."""
+    if isinstance(info, EntityRecord):
+        return info
+    if isinstance(info, (tuple, list)) and len(info) == 3:
+        return EntityRecord(
+            entity_id=fallback_id,
+            business_name=str(info[0] or "").strip(),
+            business_address=str(info[1] or "").strip(),
+            country=str(info[2] or "").strip(),
+        )
+    return EntityRecord.from_any(info)
 
 
 def analyze_misses(
     candidates: Dict[str, Set[str]],
     ground_truth: Dict[str, Set[str]],
-    s1_dict: Optional[Dict[str, Tuple[str, str, str]]] = None,
-    target_dict: Optional[Dict[str, Tuple[str, str, str]]] = None,
+    s1_dict: Optional[Dict[str, Any]] = None,
+    target_dict: Optional[Dict[str, Any]] = None,
     max_sample_display: int = 50,
 ) -> dict:
     """
     Examine completely missed S1 entities and missed pairs.
-    s1_dict and target_dict map entity_id -> (business_name, address, country).
+    s1_dict and target_dict map entity_id -> EntityRecord (or tuple/dict).
     """
     total_true_pairs = 0
     missed_pairs_count = 0
@@ -48,14 +64,16 @@ def analyze_misses(
 
         # Inspect reasons if entity metadata provided
         if s1_dict and target_dict and missed:
-            s1_info = s1_dict.get(s1_id, ("", "", ""))
-            s1_name_norm = normalize_name(s1_info[0])
-            s1_tokens = set(informative_tokens(s1_info[0]))
+            s1_info = s1_dict.get(s1_id, ("", "", "", ""))
+            s1_rec = _to_entity_record(s1_info, fallback_id=s1_id)
+            s1_name_norm = normalize_name(s1_rec.business_name)
+            s1_tokens = set(informative_tokens(s1_rec.business_name))
 
             for m_id in missed:
-                t_info = target_dict.get(m_id, ("", "", ""))
-                t_name_norm = normalize_name(t_info[0])
-                t_tokens = set(informative_tokens(t_info[0]))
+                t_info = target_dict.get(m_id, ("", "", "", ""))
+                t_rec = _to_entity_record(t_info, fallback_id=m_id)
+                t_name_norm = normalize_name(t_rec.business_name)
+                t_tokens = set(informative_tokens(t_rec.business_name))
 
                 # Diagnostic checks
                 if not s1_tokens or not t_tokens:
@@ -68,13 +86,13 @@ def analyze_misses(
                 if len(sample_misses) < max_sample_display:
                     sample_misses.append({
                         "s1_id": s1_id,
-                        "s1_name": s1_info[0],
+                        "s1_name": s1_rec.business_name,
                         "s1_norm": s1_name_norm,
                         "matched_id": m_id,
-                        "matched_name": t_info[0],
+                        "matched_name": t_rec.business_name,
                         "matched_norm": t_name_norm,
-                        "s1_country": s1_info[2],
-                        "matched_country": t_info[2],
+                        "s1_country": s1_rec.country,
+                        "matched_country": t_rec.country,
                         "common_tokens": list(s1_tokens & t_tokens),
                     })
 
