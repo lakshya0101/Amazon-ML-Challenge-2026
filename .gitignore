@@ -1,0 +1,18 @@
+# Challenge dataset — NEVER commit
+student_resource/
+
+# Generated outputs
+outputs/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
