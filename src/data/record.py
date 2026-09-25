@@ -82,3 +82,14 @@ def ensure_records(rows: Iterable[Any]) -> List[EntityRecord]:
         if all(isinstance(r, EntityRecord) for r in rows):
             return rows
     return [EntityRecord.from_any(r) for r in rows]
+
+def get_field(row: Any, field: str, index: int, default: Any = "") -> Any:
+    """
+    Safely access a field from a row that might be a dict, a tuple/list, or an object (like EntityRecord).
+    Does NOT construct any new objects, avoiding memory allocation overhead on large datasets.
+    """
+    if isinstance(row, dict):
+        return row.get(field, default)
+    if isinstance(row, (tuple, list)):
+        return row[index] if len(row) > index else default
+    return getattr(row, field, default)

@@ -35,7 +35,7 @@ from collections import defaultdict
 from typing import Dict, List, Set, Tuple, Any, Optional
 
 from src.config import Config, default_config
-from src.data.record import EntityRecord, ensure_records
+from src.data.record import EntityRecord, get_field
 from src.normalization.name_normalizer import (
     normalize_name,
     first_token,
@@ -104,12 +104,13 @@ def _build_index_norm_name(
         except Exception:
             pass
 
-    records = ensure_records(rows)
     idx: Dict[str, List[str]] = defaultdict(list)
-    for rec in records:
-        key = normalize_name(rec.business_name)
+    for row in rows:
+        entity_id = get_field(row, 'entity_id', 0)
+        business_name = get_field(row, 'business_name', 1)
+        key = normalize_name(business_name)
         if key:
-            idx[key].append(rec.entity_id)
+            idx[key].append(entity_id)
 
     idx_dict = dict(idx)
     if cache_path:
@@ -134,13 +135,15 @@ def _build_index_country_norm_name(
         except Exception:
             pass
 
-    records = ensure_records(rows)
     idx: Dict[Tuple[str, str], List[str]] = defaultdict(list)
-    for rec in records:
-        c = rec.country.strip()
-        key = normalize_name(rec.business_name)
+    for row in rows:
+        entity_id = get_field(row, 'entity_id', 0)
+        business_name = get_field(row, 'business_name', 1)
+        country = get_field(row, 'country', 3)
+        c = str(country).strip()
+        key = normalize_name(business_name)
         if key and c:
-            idx[(c, key)].append(rec.entity_id)
+            idx[(c, key)].append(entity_id)
 
     idx_dict = dict(idx)
     if cache_path:
@@ -165,12 +168,13 @@ def _build_index_first_token(
         except Exception:
             pass
 
-    records = ensure_records(rows)
     idx: Dict[str, List[str]] = defaultdict(list)
-    for rec in records:
-        tok = first_token(rec.business_name)
+    for row in rows:
+        entity_id = get_field(row, 'entity_id', 0)
+        business_name = get_field(row, 'business_name', 1)
+        tok = first_token(business_name)
         if tok:
-            idx[tok].append(rec.entity_id)
+            idx[tok].append(entity_id)
 
     idx_dict = dict(idx)
     if cache_path:
@@ -195,11 +199,12 @@ def _build_index_token_set(
         except Exception:
             pass
 
-    records = ensure_records(rows)
     idx: Dict[str, List[str]] = defaultdict(list)
-    for rec in records:
-        for tok in informative_tokens(rec.business_name):
-            idx[tok].append(rec.entity_id)
+    for row in rows:
+        entity_id = get_field(row, 'entity_id', 0)
+        business_name = get_field(row, 'business_name', 1)
+        for tok in informative_tokens(business_name):
+            idx[tok].append(entity_id)
 
     idx_dict = dict(idx)
     if cache_path:
@@ -230,16 +235,17 @@ def blocker_exact_norm_name(
     idx_s2 = _build_index_norm_name(s2_rows, cache_path=c2)
     idx_s3 = _build_index_norm_name(s3_rows, cache_path=c3)
 
-    s1_records = ensure_records(s1_rows)
     candidates: CandidateMap = defaultdict(set)
-    for rec in s1_records:
-        key = normalize_name(rec.business_name)
+    for row in s1_rows:
+        entity_id = get_field(row, 'entity_id', 0)
+        business_name = get_field(row, 'business_name', 1)
+        key = normalize_name(business_name)
         if not key:
             continue
         for cid in idx_s2.get(key, []):
-            candidates[rec.entity_id].add(cid)
+            candidates[entity_id].add(cid)
         for cid in idx_s3.get(key, []):
-            candidates[rec.entity_id].add(cid)
+            candidates[entity_id].add(cid)
     return dict(candidates), name
 
 
@@ -257,18 +263,20 @@ def blocker_country_norm_name(
     idx_s2 = _build_index_country_norm_name(s2_rows, cache_path=c2)
     idx_s3 = _build_index_country_norm_name(s3_rows, cache_path=c3)
 
-    s1_records = ensure_records(s1_rows)
     candidates: CandidateMap = defaultdict(set)
-    for rec in s1_records:
-        c = rec.country.strip()
-        key = normalize_name(rec.business_name)
+    for row in s1_rows:
+        entity_id = get_field(row, 'entity_id', 0)
+        business_name = get_field(row, 'business_name', 1)
+        country = get_field(row, 'country', 3)
+        c = str(country).strip()
+        key = normalize_name(business_name)
         if not key or not c:
             continue
         lookup = (c, key)
         for cid in idx_s2.get(lookup, []):
-            candidates[rec.entity_id].add(cid)
+            candidates[entity_id].add(cid)
         for cid in idx_s3.get(lookup, []):
-            candidates[rec.entity_id].add(cid)
+            candidates[entity_id].add(cid)
     return dict(candidates), name
 
 
@@ -286,16 +294,17 @@ def blocker_first_token(
     idx_s2 = _build_index_first_token(s2_rows, cache_path=c2)
     idx_s3 = _build_index_first_token(s3_rows, cache_path=c3)
 
-    s1_records = ensure_records(s1_rows)
     candidates: CandidateMap = defaultdict(set)
-    for rec in s1_records:
-        tok = first_token(rec.business_name)
+    for row in s1_rows:
+        entity_id = get_field(row, 'entity_id', 0)
+        business_name = get_field(row, 'business_name', 1)
+        tok = first_token(business_name)
         if not tok:
             continue
         for cid in idx_s2.get(tok, []):
-            candidates[rec.entity_id].add(cid)
+            candidates[entity_id].add(cid)
         for cid in idx_s3.get(tok, []):
-            candidates[rec.entity_id].add(cid)
+            candidates[entity_id].add(cid)
     return dict(candidates), name
 
 
@@ -314,14 +323,15 @@ def blocker_token_overlap(
     idx_s2 = _build_index_token_set(s2_rows, cache_path=c2)
     idx_s3 = _build_index_token_set(s3_rows, cache_path=c3)
 
-    s1_records = ensure_records(s1_rows)
     candidates: CandidateMap = defaultdict(set)
-    for rec in s1_records:
-        for tok in informative_tokens(rec.business_name):
+    for row in s1_rows:
+        entity_id = get_field(row, 'entity_id', 0)
+        business_name = get_field(row, 'business_name', 1)
+        for tok in informative_tokens(business_name):
             for cid in idx_s2.get(tok, [])[:max_candidates_per_token]:
-                candidates[rec.entity_id].add(cid)
+                candidates[entity_id].add(cid)
             for cid in idx_s3.get(tok, [])[:max_candidates_per_token]:
-                candidates[rec.entity_id].add(cid)
+                candidates[entity_id].add(cid)
     return dict(candidates), name
 
 
@@ -446,7 +456,7 @@ def run(
     s2_rows = load_source(cfg.train_source2)
     s3_rows = load_source(cfg.train_source3)
     ground_truth = load_ground_truth_fast(cfg.train_ground_truth)
-    all_s1_ids = [r.entity_id for r in s1_rows]
+    all_s1_ids = [get_field(r, 'entity_id', 0) for r in s1_rows]
 
     print(f"    S1: {len(s1_rows):>10,} rows")
     print(f"    S2: {len(s2_rows):>10,} rows")
@@ -514,10 +524,10 @@ def run(
     # Miss Analysis
     if "MISS_ANALYSIS" in active_stages and analyze_misses:
         print("\n[*] Running Miss Analysis ...")
-        s1_dict = {r.entity_id: r for r in s1_rows}
-        target_dict = {r.entity_id: r for r in s2_rows}
+        s1_dict = {get_field(r, 'entity_id', 0): r for r in s1_rows}
+        target_dict = {get_field(r, 'entity_id', 0): r for r in s2_rows}
         for r in s3_rows:
-            target_dict[r.entity_id] = r
+            target_dict[get_field(r, 'entity_id', 0)] = r
         miss_rep = analyze_misses(merged, ground_truth, s1_dict, target_dict)
         save_miss_analysis(miss_rep, os.path.join(cfg.output_dir, "miss_analysis.json"))
 

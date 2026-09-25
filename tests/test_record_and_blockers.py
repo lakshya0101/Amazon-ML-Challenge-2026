@@ -17,7 +17,7 @@ import unittest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.data.record import EntityRecord, ensure_records
+from src.data.record import EntityRecord, ensure_records, get_field
 from src.blocking.candidate_generator import (
     blocker_exact_norm_name,
     blocker_country_norm_name,
@@ -80,6 +80,27 @@ class TestEntityRecordRepresentation(unittest.TestCase):
         for r in rec_list:
             self.assertTrue(isinstance(r, EntityRecord))
             self.assertTrue(isinstance(r, tuple))
+
+    def test_get_field(self):
+        """Test get_field works across tuple, dict, and EntityRecord."""
+        tup = ("S1-100", "Acme Corporation", "123 Main St, New York, 10001", "US")
+        d = {
+            "entity_id": "S1-100",
+            "business_name": "Acme Corporation",
+            "business_address": "123 Main St, New York, 10001",
+            "country": "US",
+        }
+        rec = EntityRecord.from_any(tup)
+        
+        for row in (tup, d, rec):
+            self.assertEqual(get_field(row, 'entity_id', 0), "S1-100")
+            self.assertEqual(get_field(row, 'business_name', 1), "Acme Corporation")
+            self.assertEqual(get_field(row, 'business_address', 2), "123 Main St, New York, 10001")
+            self.assertEqual(get_field(row, 'country', 3), "US")
+        
+        # Test out of bounds / missing
+        self.assertEqual(get_field(("S1-200", "Only Name"), 'country', 3, "default"), "default")
+        self.assertEqual(get_field({"entity_id": "S1-200"}, 'country', 3, "default"), "default")
 
 
 class TestBlockersWithCanonicalRecords(unittest.TestCase):

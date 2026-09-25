@@ -10,7 +10,7 @@ import re
 from collections import defaultdict
 from typing import Dict, List, Set, Tuple, Any
 
-from src.data.record import EntityRecord, ensure_records
+from src.data.record import EntityRecord, get_field
 from src.normalization.name_normalizer import normalize_address, first_token
 
 # Regex for postal/zip codes (5 digit US, 6 digit India, 5 digit France)
@@ -62,38 +62,46 @@ def blocker_country_postal_initial(
     idx_s2: Dict[Tuple[str, str, str], List[str]] = defaultdict(list)
     idx_s3: Dict[Tuple[str, str, str], List[str]] = defaultdict(list)
 
-    s2_records = ensure_records(s2_data)
-    s3_records = ensure_records(s3_data)
-    s1_records = ensure_records(s1_data)
-
     # Index S2
-    for rec in s2_records:
-        pcode = extract_postal_code(rec.business_address)
-        country = rec.country.strip()
-        if pcode and country:
-            char = (first_token(rec.business_name) or " ")[0].lower()
-            idx_s2[(country, pcode, char)].append(rec.entity_id)
+    for row in s2_data:
+        entity_id = get_field(row, 'entity_id', 0)
+        business_name = get_field(row, 'business_name', 1)
+        business_address = get_field(row, 'business_address', 2)
+        country = get_field(row, 'country', 3)
+        pcode = extract_postal_code(business_address)
+        c = str(country).strip()
+        if pcode and c:
+            char = (first_token(business_name) or " ")[0].lower()
+            idx_s2[(c, pcode, char)].append(entity_id)
 
     # Index S3
-    for rec in s3_records:
-        pcode = extract_postal_code(rec.business_address)
-        country = rec.country.strip()
-        if pcode and country:
-            char = (first_token(rec.business_name) or " ")[0].lower()
-            idx_s3[(country, pcode, char)].append(rec.entity_id)
+    for row in s3_data:
+        entity_id = get_field(row, 'entity_id', 0)
+        business_name = get_field(row, 'business_name', 1)
+        business_address = get_field(row, 'business_address', 2)
+        country = get_field(row, 'country', 3)
+        pcode = extract_postal_code(business_address)
+        c = str(country).strip()
+        if pcode and c:
+            char = (first_token(business_name) or " ")[0].lower()
+            idx_s3[(c, pcode, char)].append(entity_id)
 
     candidates: Dict[str, Set[str]] = defaultdict(set)
-    for rec in s1_records:
-        pcode = extract_postal_code(rec.business_address)
-        country = rec.country.strip()
-        if not pcode or not country:
+    for row in s1_data:
+        entity_id = get_field(row, 'entity_id', 0)
+        business_name = get_field(row, 'business_name', 1)
+        business_address = get_field(row, 'business_address', 2)
+        country = get_field(row, 'country', 3)
+        pcode = extract_postal_code(business_address)
+        c = str(country).strip()
+        if not pcode or not c:
             continue
-        char = (first_token(rec.business_name) or " ")[0].lower()
-        key = (country, pcode, char)
+        char = (first_token(business_name) or " ")[0].lower()
+        key = (c, pcode, char)
 
         for cid in idx_s2.get(key, [])[:max_candidates_per_block]:
-            candidates[rec.entity_id].add(cid)
+            candidates[entity_id].add(cid)
         for cid in idx_s3.get(key, [])[:max_candidates_per_block]:
-            candidates[rec.entity_id].add(cid)
+            candidates[entity_id].add(cid)
 
     return dict(candidates), name

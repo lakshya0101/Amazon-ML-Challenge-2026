@@ -12,7 +12,7 @@ import pickle
 from collections import defaultdict
 from typing import Dict, List, Optional, Set, Tuple, Any
 
-from src.data.record import EntityRecord, ensure_records
+from src.data.record import EntityRecord, get_field
 from src.normalization.name_normalizer import normalize_name
 
 try:
@@ -44,31 +44,36 @@ def blocker_tfidf_retrieval(
         print("[Warning] scikit-learn not available. Skipping TF-IDF blocker.")
         return {}, name
 
-    s2_records = ensure_records(s2_data)
-    s3_records = ensure_records(s3_data)
-    s1_records = ensure_records(s1_data)
-
     # Group targets (S2 + S3) by country
     targets_by_country: Dict[str, List[Tuple[str, str]]] = defaultdict(list)
-    for rec in s2_records:
-        bname = normalize_name(rec.business_name)
-        country = rec.country.strip() or "UNKNOWN"
+    for row in s2_data:
+        entity_id = get_field(row, 'entity_id', 0)
+        business_name = get_field(row, 'business_name', 1)
+        country = get_field(row, 'country', 3)
+        bname = normalize_name(business_name)
+        c = str(country).strip() or "UNKNOWN"
         if bname:
-            targets_by_country[country].append((rec.entity_id, bname))
+            targets_by_country[c].append((entity_id, bname))
 
-    for rec in s3_records:
-        bname = normalize_name(rec.business_name)
-        country = rec.country.strip() or "UNKNOWN"
+    for row in s3_data:
+        entity_id = get_field(row, 'entity_id', 0)
+        business_name = get_field(row, 'business_name', 1)
+        country = get_field(row, 'country', 3)
+        bname = normalize_name(business_name)
+        c = str(country).strip() or "UNKNOWN"
         if bname:
-            targets_by_country[country].append((rec.entity_id, bname))
+            targets_by_country[c].append((entity_id, bname))
 
     # Group queries (S1) by country
     queries_by_country: Dict[str, List[Tuple[str, str]]] = defaultdict(list)
-    for rec in s1_records:
-        bname = normalize_name(rec.business_name)
-        country = rec.country.strip() or "UNKNOWN"
+    for row in s1_data:
+        entity_id = get_field(row, 'entity_id', 0)
+        business_name = get_field(row, 'business_name', 1)
+        country = get_field(row, 'country', 3)
+        bname = normalize_name(business_name)
+        c = str(country).strip() or "UNKNOWN"
         if bname:
-            queries_by_country[country].append((rec.entity_id, bname))
+            queries_by_country[c].append((entity_id, bname))
 
     candidates: Dict[str, Set[str]] = defaultdict(set)
 
