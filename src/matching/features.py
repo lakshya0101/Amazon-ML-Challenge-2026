@@ -1,222 +1,343 @@
 
+from typing import Dict
+
 from rapidfuzz import fuzz
 
-from src.preprocessing.normalization import (
-    normalize_name,
-    normalize_name_core,
-    normalize_address,
-    normalize_country,
-    name_tokens,
-    extract_postal_code,
-    extract_house_number,
-)
+
+FEATURE_COLUMNS = [
+    # NAME
+    "name_exact",
+    "name_core_exact",
+    "name_fuzzy",
+    "name_token_sort",
+    "name_token_set",
+    "name_partial",
+    "name_jaccard",
+    "name_core_fuzzy",
+
+    # ADDRESS
+    "address_exact",
+    "address_fuzzy",
+    "address_token_sort",
+    "address_token_set",
+    "address_jaccard",
+    "postal_match",
+    "house_number_match",
+    "address_missing_a",
+    "address_missing_b",
+    "both_addresses_missing",
+
+    # COUNTRY
+    "country_missing_a",
+    "country_missing_b",
+    "country_normalized_match",
+    "country_similarity",
+]
 
 
-def safe_ratio(a, b):
+def safe_ratio(a: str, b: str) -> float:
     if not a or not b:
         return 0.0
 
-    return fuzz.ratio(
-        str(a),
-        str(b)
-    ) / 100.0
+    return fuzz.ratio(a, b) / 100.0
 
 
-def token_sort_similarity(a, b):
+def token_sort_similarity(a: str, b: str) -> float:
     if not a or not b:
         return 0.0
 
-    return fuzz.token_sort_ratio(
-        str(a),
-        str(b)
-    ) / 100.0
+    return fuzz.token_sort_ratio(a, b) / 100.0
 
 
-def token_set_similarity(a, b):
+def token_set_similarity(a: str, b: str) -> float:
     if not a or not b:
         return 0.0
 
-    return fuzz.token_set_ratio(
-        str(a),
-        str(b)
-    ) / 100.0
+    return fuzz.token_set_ratio(a, b) / 100.0
 
 
-def partial_similarity(a, b):
+def partial_similarity(a: str, b: str) -> float:
     if not a or not b:
         return 0.0
 
-    return fuzz.partial_ratio(
-        str(a),
-        str(b)
-    ) / 100.0
+    return fuzz.partial_ratio(a, b) / 100.0
 
 
-def jaccard_tokens(a, b):
+def jaccard_tokens(tokens_a, tokens_b) -> float:
+    set_a = set(tokens_a or [])
+    set_b = set(tokens_b or [])
 
-    if isinstance(a, str):
-        a = a.split()
+    if not set_a and not set_b:
+        return 1.0
 
-    if isinstance(b, str):
-        b = b.split()
+    if not set_a or not set_b:
+        return 0.0
 
-    a = set(a or [])
-    b = set(b or [])
+    return len(set_a & set_b) / len(set_a | set_b)
 
+
+def _exact_match(a: str, b: str) -> float:
+    """
+    Empty-vs-empty is not treated as a positive match.
+    """
     if not a or not b:
         return 0.0
 
-    return len(a & b) / len(a | b)
+    return float(a == b)
 
 
-def generate_pair_features(record_a, record_b):
+def _missing(value: str) -> float:
+    return float(not value)
 
-    name_a = record_a.get(
-        "business_name",
-        record_a.get("raw_name", "")
+
+def generate_pair_features(
+    normalized_record_a: Dict,
+    normalized_record_b: Dict,
+) -> Dict[str, float]:
+    """
+    Generate the final 22 shared features.
+
+    IMPORTANT:
+    Inputs must already be normalized using normalize_record().
+
+    No normalization is performed here.
+    """
+
+    # =====================================================
+    # NAME
+    # =====================================================
+
+    name_a = normalized_record_a.get(
+        "normalized_name",
+        "",
     )
 
-    name_b = record_b.get(
-        "business_name",
-        record_b.get("raw_name", "")
+    name_b = normalized_record_b.get(
+        "normalized_name",
+        "",
     )
 
-    address_a = record_a.get(
-        "business_address",
-        record_a.get("raw_address", "")
+    core_a = normalized_record_a.get(
+        "name_core",
+        "",
     )
 
-    address_b = record_b.get(
-        "business_address",
-        record_b.get("raw_address", "")
+    core_b = normalized_record_b.get(
+        "name_core",
+        "",
     )
 
-    country_a = record_a.get(
-        "country",
-        record_a.get("raw_country", "")
+    tokens_a = normalized_record_a.get(
+        "name_tokens",
+        [],
     )
 
-    country_b = record_b.get(
-        "country",
-        record_b.get("raw_country", "")
+    tokens_b = normalized_record_b.get(
+        "name_tokens",
+        [],
     )
 
-    norm_name_a = normalize_name(name_a)
-    norm_name_b = normalize_name(name_b)
+    name_exact = _exact_match(
+        name_a,
+        name_b,
+    )
 
-    core_name_a = normalize_name_core(name_a)
-    core_name_b = normalize_name_core(name_b)
+    name_core_exact = _exact_match(
+        core_a,
+        core_b,
+    )
 
-    norm_address_a = normalize_address(address_a)
-    norm_address_b = normalize_address(address_b)
+    name_fuzzy = safe_ratio(
+        name_a,
+        name_b,
+    )
 
-    country_norm_a = normalize_country(country_a)
-    country_norm_b = normalize_country(country_b)
+    name_token_sort = token_sort_similarity(
+        name_a,
+        name_b,
+    )
 
-    tokens_a = name_tokens(name_a)
-    tokens_b = name_tokens(name_b)
+    name_token_set = token_set_similarity(
+        name_a,
+        name_b,
+    )
 
-    postal_a = extract_postal_code(address_a)
-    postal_b = extract_postal_code(address_b)
+    name_partial = partial_similarity(
+        name_a,
+        name_b,
+    )
 
-    house_a = extract_house_number(address_a)
-    house_b = extract_house_number(address_b)
+    name_jaccard = jaccard_tokens(
+        tokens_a,
+        tokens_b,
+    )
 
-    return {
+    name_core_fuzzy = safe_ratio(
+        core_a,
+        core_b,
+    )
 
-        "name_exact": float(
-            bool(norm_name_a)
-            and norm_name_a == norm_name_b
-        ),
+    # =====================================================
+    # ADDRESS
+    # =====================================================
 
-        "name_core_exact": float(
-            bool(core_name_a)
-            and core_name_a == core_name_b
-        ),
+    address_a = normalized_record_a.get(
+        "normalized_address",
+        "",
+    )
 
-        "name_fuzzy": safe_ratio(
-            norm_name_a,
-            norm_name_b
-        ),
+    address_b = normalized_record_b.get(
+        "normalized_address",
+        "",
+    )
 
-        "name_token_sort": token_sort_similarity(
-            norm_name_a,
-            norm_name_b
-        ),
+    address_exact = _exact_match(
+        address_a,
+        address_b,
+    )
 
-        "name_token_set": token_set_similarity(
-            norm_name_a,
-            norm_name_b
-        ),
+    address_fuzzy = safe_ratio(
+        address_a,
+        address_b,
+    )
 
-        "name_partial": partial_similarity(
-            norm_name_a,
-            norm_name_b
-        ),
+    address_token_sort = token_sort_similarity(
+        address_a,
+        address_b,
+    )
 
-        "name_jaccard": jaccard_tokens(
-            tokens_a,
-            tokens_b
-        ),
+    address_token_set = token_set_similarity(
+        address_a,
+        address_b,
+    )
 
-        "name_core_fuzzy": safe_ratio(
-            core_name_a,
-            core_name_b
-        ),
+    address_tokens_a = (
+        address_a.split()
+        if address_a
+        else []
+    )
 
-        "address_exact": float(
-            bool(norm_address_a)
-            and norm_address_a == norm_address_b
-        ),
+    address_tokens_b = (
+        address_b.split()
+        if address_b
+        else []
+    )
 
-        "address_fuzzy": safe_ratio(
-            norm_address_a,
-            norm_address_b
-        ),
+    address_jaccard = jaccard_tokens(
+        address_tokens_a,
+        address_tokens_b,
+    )
 
-        "address_token_sort": token_sort_similarity(
-            norm_address_a,
-            norm_address_b
-        ),
+    postal_a = normalized_record_a.get(
+        "postal_code",
+        "",
+    )
 
-        "address_token_set": token_set_similarity(
-            norm_address_a,
-            norm_address_b
-        ),
+    postal_b = normalized_record_b.get(
+        "postal_code",
+        "",
+    )
 
-        "address_jaccard": jaccard_tokens(
-            norm_address_a,
-            norm_address_b
-        ),
+    postal_match = _exact_match(
+        postal_a,
+        postal_b,
+    )
 
-        "postal_match": float(
-            bool(postal_a)
-            and bool(postal_b)
-            and postal_a == postal_b
-        ),
+    house_a = normalized_record_a.get(
+        "house_number",
+        "",
+    )
 
-        "house_number_match": float(
-            bool(house_a)
-            and bool(house_b)
-            and house_a == house_b
-        ),
+    house_b = normalized_record_b.get(
+        "house_number",
+        "",
+    )
 
-        "address_missing_a": float(
-            not bool(norm_address_a)
-        ),
+    house_number_match = _exact_match(
+        house_a,
+        house_b,
+    )
 
-        "address_missing_b": float(
-            not bool(norm_address_b)
-        ),
+    address_missing_a = _missing(
+        address_a
+    )
 
-        "both_addresses_missing": float(
-            not bool(norm_address_a)
-            and not bool(norm_address_b)
-        ),
+    address_missing_b = _missing(
+        address_b
+    )
 
-        "country_normalized_match": float(
-            bool(country_norm_a)
-            and bool(country_norm_b)
-            and country_norm_a == country_norm_b
-        ),
+    both_addresses_missing = float(
+        not address_a and not address_b
+    )
+
+    # =====================================================
+    # COUNTRY
+    # =====================================================
+
+    country_a = normalized_record_a.get(
+        "normalized_country",
+        "",
+    )
+
+    country_b = normalized_record_b.get(
+        "normalized_country",
+        "",
+    )
+
+    country_missing_a = _missing(
+        country_a
+    )
+
+    country_missing_b = _missing(
+        country_b
+    )
+
+    country_normalized_match = _exact_match(
+        country_a,
+        country_b,
+    )
+
+    country_similarity = safe_ratio(
+        country_a,
+        country_b,
+    )
+
+    # =====================================================
+    # FINAL 22 FEATURES
+    # =====================================================
+
+    features = {
+        # NAME
+        "name_exact": name_exact,
+        "name_core_exact": name_core_exact,
+        "name_fuzzy": name_fuzzy,
+        "name_token_sort": name_token_sort,
+        "name_token_set": name_token_set,
+        "name_partial": name_partial,
+        "name_jaccard": name_jaccard,
+        "name_core_fuzzy": name_core_fuzzy,
+
+        # ADDRESS
+        "address_exact": address_exact,
+        "address_fuzzy": address_fuzzy,
+        "address_token_sort": address_token_sort,
+        "address_token_set": address_token_set,
+        "address_jaccard": address_jaccard,
+        "postal_match": postal_match,
+        "house_number_match": house_number_match,
+        "address_missing_a": address_missing_a,
+        "address_missing_b": address_missing_b,
+        "both_addresses_missing": both_addresses_missing,
+
+        # COUNTRY
+        "country_missing_a": country_missing_a,
+        "country_missing_b": country_missing_b,
+        "country_normalized_match": country_normalized_match,
+        "country_similarity": country_similarity,
     }
+
+    # Ensure the implementation cannot silently drift
+    # away from the agreed feature interface.
+    assert list(features.keys()) == FEATURE_COLUMNS
+
+    return features
