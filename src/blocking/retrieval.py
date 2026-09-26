@@ -1,5 +1,4 @@
-"""Candidate retrieval strategies with provenance tracking."""
-
+from collections import defaultdict
 from typing import Dict, List, Set, Any, Optional
 from src.blocking.config import BlockingConfig
 from src.blocking.indexes import BlockingIndex, ensure_normalized_record
@@ -10,6 +9,7 @@ RULE_NAME_CORE = "name_core"
 RULE_COUNTRY_TOKEN = "country_name_token"
 RULE_POSTAL_CODE = "postal_code"
 RULE_HOUSE_ADDRESS_TOKEN = "house_number_address_token"
+RULE_COUNTRY_ADDRESS_TOKENS = "country_address_tokens"
 
 ALL_RULES = [
     RULE_EXACT_NAME,
@@ -17,7 +17,9 @@ ALL_RULES = [
     RULE_COUNTRY_TOKEN,
     RULE_POSTAL_CODE,
     RULE_HOUSE_ADDRESS_TOKEN,
+    RULE_COUNTRY_ADDRESS_TOKENS,
 ]
+
 
 
 def retrieve_exact_name(record: Dict[str, Any], index: BlockingIndex, max_bucket_size: Optional[int] = None) -> List[str]:
@@ -116,6 +118,48 @@ def retrieve_house_number_address_token(
     return candidates
 
 
+def retrieve_country_address_tokens(
+    record: Dict[str, Any],
+    index: BlockingIndex,
+    config: BlockingConfig,
+) -> List[str]:
+    """Retrieves candidates sharing >= country_address_token_min_shared informative address tokens within the same country."""
+    country = record.get("normalized_country", "")
+    norm_address = record.get("normalized_address", "")
+    if not country or not norm_address:
+        return []
+
+    min_shared = config.country_address_token_min_shared
+    addr_tokens = norm_address.split()
+    seen_tokens: Set[str] = set()
+
+    for token in addr_tokens:
+        if (
+            len(token) >= config.min_address_token_length
+            and token not in config.address_stopwords
+            and token not in seen_tokens
+        ):
+            seen_tokens.add(token)
+
+    if len(seen_tokens) < min_shared:
+        return []
+
+    target_match_counts: Dict[str, int] = defaultdict(int)
+
+    for token in seen_tokens:
+        bucket = index.country_address_token_index.get((country, token), [])
+        if config.max_bucket_size and len(bucket) > config.max_bucket_size:
+            continue
+        for match_id in bucket:
+            target_match_counts[match_id] += 1
+
+    return [
+        match_id
+        for match_id, count in target_match_counts.items()
+        if count >= min_shared
+    ]
+
+
 def retrieve_candidates_with_provenance(
     s1_record: Dict[str, Any],
     index: BlockingIndex,
@@ -160,4 +204,12 @@ def retrieve_candidates_with_provenance(
                 candidate_provenance[match_id] = set()
             candidate_provenance[match_id].add(RULE_HOUSE_ADDRESS_TOKEN)
 
+    # 6. Country + Informative Address Tokens (>= min_shared)
+    if config.country_address_tokens:
+        for match_id in retrieve_country_address_tokens(s1_norm, index, config):
+            if match_id not in candidate_provenance:
+                candidate_provenance[match_id] = set()
+            candidate_provenance[match_id].add(RULE_COUNTRY_ADDRESS_TOKENS)
+
     return candidate_provenance
+

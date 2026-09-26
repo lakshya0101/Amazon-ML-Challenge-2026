@@ -31,6 +31,7 @@ class BlockingIndex:
         self.country_token_index: Dict[tuple, List[str]] = defaultdict(list)
         self.postal_index: Dict[str, List[str]] = defaultdict(list)
         self.house_address_token_index: Dict[tuple, List[str]] = defaultdict(list)
+        self.country_address_token_index: Dict[tuple, List[str]] = defaultdict(list)
 
         self.records: Dict[str, Dict[str, Any]] = {}
         self.record_ids: List[str] = []
@@ -106,5 +107,19 @@ class BlockingIndex:
                     seen_addr_tokens.add(token)
                     self.house_address_token_index[(house_number, token)].append(record_id)
 
+        # 6. Country + Informative Address Token Index
+        if country and norm_address:
+            addr_tokens = norm_address.split()
+            seen_country_addr_tokens: Set[str] = set()
+            for token in addr_tokens:
+                if (
+                    len(token) >= self.config.min_address_token_length
+                    and token not in self.config.address_stopwords
+                    and token not in seen_country_addr_tokens
+                ):
+                    seen_country_addr_tokens.add(token)
+                    self.country_address_token_index[(country, token)].append(record_id)
+
     def __len__(self) -> int:
         return len(self.records)
+

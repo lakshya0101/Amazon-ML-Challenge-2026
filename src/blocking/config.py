@@ -68,18 +68,21 @@ DEFAULT_ADDRESS_STOPWORDS: Set[str] = {
 @dataclass
 class BlockingConfig:
     """Configuration options for multi-strategy candidate generation."""
-    # Phase 1 Deterministic Strategies
+    # Deterministic Strategies
     exact_name: bool = True
     exact_name_core: bool = True
     country_name_token: bool = True
     postal_code: bool = True
     house_number_address_token: bool = True
+    country_address_tokens: bool = True
 
     # Token constraints
     min_name_token_length: int = 3
     min_address_token_length: int = 3
+    country_address_token_min_shared: int = 2
     name_stopwords: Set[str] = field(default_factory=lambda: set(DEFAULT_NAME_STOPWORDS))
     address_stopwords: Set[str] = field(default_factory=lambda: set(DEFAULT_ADDRESS_STOPWORDS))
 
     # Safety frequency threshold (skip tokens indexed in > max_bucket_size records; None or 0 to disable)
     max_bucket_size: Optional[int] = 5000
+

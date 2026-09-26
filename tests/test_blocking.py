@@ -15,7 +15,9 @@ from src.blocking.retrieval import (
     RULE_COUNTRY_TOKEN,
     RULE_POSTAL_CODE,
     RULE_HOUSE_ADDRESS_TOKEN,
+    RULE_COUNTRY_ADDRESS_TOKENS,
 )
+
 
 
 @pytest.fixture
@@ -245,7 +247,7 @@ def test_evaluation_and_ablation(synthetic_dataset):
     )
     assert "individual_strategies" in ablation
     assert "cumulative_stages" in ablation
-    assert ablation["cumulative_stages"]["Full Phase 1 Union"]["overall"]["candidate_recall"] == 1.0
+    assert ablation["cumulative_stages"]["Full Union (+ country_address_tokens)"]["overall"]["candidate_recall"] == 1.0
 
 
 def test_tsv_export(synthetic_dataset):
@@ -318,4 +320,192 @@ def test_missed_true_pairs_diagnosis():
     assert metrics["overall"]["candidate_recall"] == 0.0
     assert len(metrics["overall"]["missed_true_pairs"]) == 1
     assert ("s1_1", "S2", "s2_1") in metrics["overall"]["missed_true_pairs"]
+
+
+def test_country_address_tokens_shared_threshold_and_country():
+    """Verify >=2 shared address tokens retrieves, exactly 1 does not, different country does not."""
+    # Only enable country_address_tokens rule
+    config = BlockingConfig(
+        exact_name=False,
+        exact_name_core=False,
+        country_name_token=False,
+        postal_code=False,
+        house_number_address_token=False,
+        country_address_tokens=True,
+        country_address_token_min_shared=2,
+    )
+
+    s1 = [
+        # Informative address tokens: "green", "valley", "center" (street is stopword)
+        {
+            "id": "s1_addr_match",
+            "business_name": "Entity One",
+            "business_address": "500 Green Valley Center Street",
+            "country": "USA",
+        }
+    ]
+
+    s2 = [
+        # Shares 2 tokens: "green", "valley" -> should MATCH
+        {
+            "id": "s2_match_2_tokens",
+            "business_name": "Totally Different Name A",
+            "business_address": "123 Green Valley Road",
+            "country": "USA",
+        },
+        # Shares only 1 token: "green" -> should NOT match (shared count = 1 < 2)
+        {
+            "id": "s2_1_token_only",
+            "business_name": "Totally Different Name B",
+            "business_address": "999 Green Hill Road",
+            "country": "USA",
+        },
+        # Shares 2 tokens: "green", "valley", but in DIFFERENT country -> should NOT match
+        {
+            "id": "s2_diff_country",
+            "business_name": "Totally Different Name C",
+            "business_address": "123 Green Valley Road",
+            "country": "UK",
+        },
+    ]
+    s3 = []
+
+    gen = CandidateGenerator(config=config)
+    res = gen.generate(s1, s2, s3)
+
+    retrieved_s2_ids = {c.match_id for c in res["s2_candidates"]}
+    assert "s2_match_2_tokens" in retrieved_s2_ids
+    assert "s2_1_token_only" not in retrieved_s2_ids
+    assert "s2_diff_country" not in retrieved_s2_ids
+
+    # Check provenance
+    match_candidate = [c for c in res["s2_candidates"] if c.match_id == "s2_match_2_tokens"][0]
+    assert RULE_COUNTRY_ADDRESS_TOKENS in match_candidate.blocking_rules
+
+
+def test_country_address_tokens_duplicate_tokens_and_oversized_bucket():
+    """Verify duplicate address tokens are counted once, and oversized buckets are ignored."""
+    config = BlockingConfig(
+        exact_name=False,
+        exact_name_core=False,
+        country_name_token=False,
+        postal_code=False,
+        house_number_address_token=False,
+        country_address_tokens=True,
+        country_address_token_min_shared=2,
+        max_bucket_size=5,
+    )
+
+    # S1 has repeated token "river" -> unique tokens: "river", "park"
+    s1 = [
+        {
+            "id": "s1_dup",
+            "business_name": "Delta Inc",
+            "business_address": "River River River Road",  # Only 1 unique informative token: "river"
+            "country": "USA",
+        }
+    ]
+
+    # Target also has "river" repeated
+    s2 = [
+        {
+            "id": "s2_dup_target",
+            "business_name": "Echo LLC",
+            "business_address": "River River River Blvd",
+            "country": "USA",
+        }
+    ]
+    s3 = []
+
+    gen = CandidateGenerator(config=config)
+    res = gen.generate(s1, s2, s3)
+
+    # Since unique shared tokens is 1 ("river"), it should NOT meet threshold of 2
+    assert len(res["s2_candidates"]) == 0
+
+    # Test oversized bucket pruning
+    s1_multi = [
+        {
+            "id": "s1_multi",
+            "business_name": "Foxtrot",
+            "business_address": "100 Popular Unique Place",  # "popular", "unique", "place"
+            "country": "USA",
+        }
+    ]
+    # Create 10 targets with "popular" -> bucket size for ("us", "popular") = 10 > max_bucket_size (5)
+    s2_oversized = [
+        {
+            "id": f"s2_pop_{i}",
+            "business_name": f"Pop {i}",
+            "business_address": "Popular Random Highway",
+            "country": "USA",
+        }
+        for i in range(10)
+    ]
+    gen_oversized = CandidateGenerator(config=config)
+    res_oversized = gen_oversized.generate(s1_multi, s2_oversized, [])
+    # "popular" bucket exceeds max_bucket_size of 5 so ignored, no match reaches threshold of 2
+    assert len(res_oversized["s2_candidates"]) == 0
+
+
+def test_country_address_tokens_missing_address_safety():
+    """Verify missing address in S1 or target does not crash and produces no false matches."""
+    config = BlockingConfig(
+        exact_name=False,
+        exact_name_core=False,
+        country_name_token=False,
+        postal_code=False,
+        house_number_address_token=False,
+        country_address_tokens=True,
+        country_address_token_min_shared=2,
+    )
+
+    s1 = [
+        {"id": "s1_no_addr", "business_name": "No Address Co", "business_address": "", "country": "USA"},
+        {"id": "s1_none_addr", "business_name": "None Address Co", "business_address": None, "country": "USA"},
+        {"id": "s1_valid", "business_name": "Valid", "business_address": "100 Industrial Parkway Sector", "country": "USA"},
+    ]
+    s2 = [
+        {"id": "s2_no_addr", "business_name": "No Address Target", "business_address": "", "country": "USA"},
+        {"id": "s2_none_country", "business_name": "No Country Target", "business_address": "100 Industrial Parkway Sector", "country": ""},
+    ]
+
+    gen = CandidateGenerator(config=config)
+    res = gen.generate(s1, s2, [])
+    assert len(res["all_candidates"]) == 0
+
+
+def test_s2_s3_independence_for_country_address_tokens():
+    """Verify S2 and S3 candidate retrieval remain independent for country address tokens."""
+    config = BlockingConfig(
+        exact_name=False,
+        exact_name_core=False,
+        country_name_token=False,
+        postal_code=False,
+        house_number_address_token=False,
+        country_address_tokens=True,
+        country_address_token_min_shared=2,
+    )
+
+    s1 = [
+        {"id": "s1_common", "business_name": "Entity S1", "business_address": "777 Highland Summit Trail", "country": "USA"}
+    ]
+    s2 = [
+        {"id": "s2_match", "business_name": "Target S2", "business_address": "10 Highland Summit Road", "country": "USA"}
+    ]
+    s3 = [
+        {"id": "s3_match", "business_name": "Target S3", "business_address": "20 Highland Summit Avenue", "country": "USA"}
+    ]
+
+    gen = CandidateGenerator(config=config)
+    res = gen.generate(s1, s2, s3)
+
+    assert len(res["s2_candidates"]) == 1
+    assert res["s2_candidates"][0].match_id == "s2_match"
+    assert res["s2_candidates"][0].match_source == "S2"
+
+    assert len(res["s3_candidates"]) == 1
+    assert res["s3_candidates"][0].match_id == "s3_match"
+    assert res["s3_candidates"][0].match_source == "S3"
+
 
