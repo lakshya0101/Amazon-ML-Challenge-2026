@@ -6,7 +6,12 @@ __pycache__/
 htmlcov/
 *.tsv
 *.csv
+*.joblib
+models/
+data/
 .env
 .venv
 env/
 venv/
+.ipynb_checkpoints/
+
